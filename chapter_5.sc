@@ -87,3 +87,97 @@ def retry[T](max: Int, initial: Int)(f: => T): T = {
 }
 
 val httpBinUrl = "https://httpbin.org/status/200,400,500"
+
+def stringSplitBrackets(s: String): Seq[String] = {
+  assert(s.head == '[')
+  assert(s.last == ']')
+
+  val indices = collection.mutable.ArrayDeque.empty[Int]
+  var openBrackets = 0
+
+  for (i <- Range(1, s.length - 1)) {
+    s(i) match {
+      case '[' => openBrackets += 1
+      case ']' => openBrackets -= 1
+      case ',' => {
+        if (openBrackets == 0) {
+          indices += i
+        }
+      }
+      case _ => // no-op
+    }
+  }
+
+  val allIndices = Seq(0) ++ indices ++ Seq(s.length - 1)
+
+  val sectionIndices = allIndices.zip(allIndices.tail)
+
+  // pass the rest of the
+  for ((start, finish) <- sectionIndices)
+  yield s.substring(start + 1, finish)
+}
+
+trait StrParser[T] { def parse(s: String): T }
+
+object StrParser {
+  implicit object ParseInt extends StrParser[Int] {
+    def parse(s: String): Int = s.toInt
+  }
+  implicit object ParseBoolean extends StrParser[Boolean] {
+    def parse(s: String): Boolean = s.toBoolean
+  }
+  implicit object ParseDouble extends StrParser[Double] {
+    def parse(s: String): Double = s.toDouble
+  }
+
+  implicit def ParseList[T](implicit p: StrParser[T]) = new StrParser[List[T]] {
+    def parse(s: String) = stringSplitBrackets(s).toList.map(p.parse)
+  }
+
+  implicit def ParseTuple[S, T](implicit p: StrParser[S], q: StrParser[T]) =
+    new StrParser[(S, T)]{
+      def parse(s: String) = {
+        val Seq(left, right)= stringSplitBrackets(s)
+        (p.parse(left), q.parse(right))
+      }
+    }
+}
+
+def parseFromString[T](s: String)(implicit parser: StrParser[T]) = {
+  parser.parse(s)
+}
+
+val threeLayersString =  "[[[1],[true]],[[2,3],[false,true]],[[4,5,6],[false,true,false]]]"
+
+val threeLayersOfNesting = parseFromString[List[(List[Int], List[Boolean])]](threeLayersString)
+
+trait StrWriter[T] { def write(t: T): String }
+
+object StrWriter {
+  implicit object IntWriter extends StrWriter[Int] {
+    def write(i: Int) = i.toString
+  }
+  implicit object BooleanWriter extends StrWriter[Boolean] {
+    def write(b: Boolean) = b.toString
+  }
+  implicit object Double extends StrWriter[Double] {
+    def write(d: Double) = d.toString
+  }
+  implicit def WriteList[T](implicit w: StrWriter[T]) =
+    new StrWriter[List[T]]{
+      def write(input: List[T]) = {
+        input.map(w.write).mkString("[", ",", "]")
+      }
+    }
+  implicit def WriteTuple[S, T](implicit u: StrWriter[S], v: StrWriter[T]) =
+    new StrWriter[(S, T)]{
+      def write(input: (S, T)) = {
+        val (left, right) = input
+        "[" + u.write(left) + "," + v.write(right) + "]"
+      }
+    }
+}
+
+def writeToString[T](t: T)(implicit writer: StrWriter[T]): String = {
+  writer.write(t)
+}
